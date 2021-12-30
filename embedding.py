@@ -7,9 +7,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import joblib
 import jieba
 from gensim.models import LdaMulticore
-from feature import label2idx
+from features import label2idx
 import gensim
 import config
+import json
 
 
 class SingletonMetaclass(type):
@@ -45,11 +46,15 @@ class Embedding(metaclass=SingletonMetaclass):
         :param path:
         :return:
         """
-        data = pd.read_csv(path, sep='\t')
+        data = pd.read_csv(path, names=["label", "text"], header=None, sep="\t")
+        te_shu = json.load(open('./data/te_shu.json', encoding='utf-8'))
+        data["label"] = data.apply(lambda row: str(row['label']), axis=1)
+        data["label"] = data['label'].map(te_shu)
         data = data.fillna("")
 
         data["text"] = data['text'].apply(lambda x: " ".join([w for w in x.split()
                                                               if w not in self.stopwords and w != '']))
+        # print(data.loc[0].values)
         self.labelToIndex = label2idx(data)
         data["label"] = data['label'].map(self.labelToIndex)
         data["label"] = data.apply(lambda row: float(row['label']), axis=1)
@@ -118,7 +123,7 @@ class Embedding(metaclass=SingletonMetaclass):
         self.lda = models.ldamodel.LdaModel.load("./model/lda")
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     em = Embedding()
     em.load_data(config.train_data_file)
     em.trainer()
