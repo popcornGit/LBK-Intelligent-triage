@@ -49,6 +49,7 @@ class Classifier:
 
     def feature_engineer(self, data):
         data = get_tfidf(self.embedding.tfidf, data)
+        # print(self.embedding.w2v.index_to_key)
         data = get_embedding_feature(data, self.embedding.w2v)
 
         return data
