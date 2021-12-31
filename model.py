@@ -11,7 +11,8 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from skmultilearn.problem_transform import BinaryRelevance
 
 from embedding import Embedding
-from features import (get_tfidf, get_embedding_feature)
+from features import (get_tfidf, get_embedding_feature,
+                      get_lda_features, get_basic_feature)
 
 
 class Classifier:
@@ -49,9 +50,9 @@ class Classifier:
 
     def feature_engineer(self, data):
         data = get_tfidf(self.embedding.tfidf, data)
-        # print(self.embedding.w2v.index_to_key)
         data = get_embedding_feature(data, self.embedding.w2v)
-
+        data = get_lda_features(data, self.embedding.lda)
+        data = get_basic_feature(data)
         return data
 
     def trainer(self):

@@ -8,6 +8,7 @@ import jieba.posseg as pseg
 import jieba
 import json
 import os
+import pickle
 
 
 def label2idx(data):
@@ -25,6 +26,11 @@ def label2idx(data):
 
 
 def get_tfidf(tfidf, data):
+    if os.path.exists('./data/tfidf.pkl'):
+        with open('./data/tfidf.pkl', 'rb') as f:
+            data = pickle.load(f)
+        return data
+
     stopWords = [x.strip() for x in open("./data/stopwords.txt").readlines()]
     text = data["text"].apply(lambda x: " ".join([w for w in x.split() if w not in stopWords and w != '']))
     data_tfidf = pd.DataFrame(
@@ -33,11 +39,14 @@ def get_tfidf(tfidf, data):
     data_tfidf.columns = ['tfidf' + str(i) for i in range(data_tfidf.shape[1])]
     data = pd.concat([data, data_tfidf], axis=1)
     # print(data.loc[0].values())
-
+    with open('./data/tfidf.pkl', 'wb') as f:
+        pickle.dump(data, f)
     return data
 
 
 def array2df(data, col):
+    a = data[col].values
+    b = columns=[col + "_" + str(i) for i in range(len(data[col].iloc[0]))]
     return pd.DataFrame.from_records(
         data[col].values,
         columns=[col + "_" + str(i) for i in range(len(data[col].iloc[0]))]
@@ -51,21 +60,30 @@ def get_embedding_feature(data, embedding_model):
     :param embedding_model:
     :return:
     """
-    labelToIndex = label2idx(data)
+    if os.path.exists('./data/embedding_feature.pkl'):
+        with open('./data/embedding_feature.pkl', 'rb') as f:
+            data = pickle.load(f)
+        return data
 
-    w2v_label_embedding = np.array(
-        [np.mean([embedding_model[word] for word in key
-                  if word in embedding_model.index_to_key],
-                 axis=0)
-         for key in labelToIndex])
 
-    joblib.dump(w2v_label_embedding, './data/w2v_label_embedding.pkl')
+    else:
+        labelToIndex = label2idx(data)
 
-    tmp = data['text'].apply(lambda x: pd.Series(
-        generate_feature(x, embedding_model, w2v_label_embedding)
-    ))
-    tmp = pd.concat([array2df(tmp, col) for col in tmp.colums], axis=1)
-    data = pd.concat([data, tmp], axis=1)
+        w2v_label_embedding = np.array(
+            [np.mean([embedding_model[word] for word in key
+                      if word in embedding_model.index_to_key],
+                     axis=0)
+             for key in labelToIndex])
+
+        joblib.dump(w2v_label_embedding, './data/w2v_label_embedding.pkl')
+
+        tmp = data['text'].apply(lambda x: pd.Series(
+            generate_feature(x, embedding_model, w2v_label_embedding)
+        ))
+        tmp = pd.concat([array2df(tmp, col) for col in tmp.colums], axis=1)
+        data = pd.concat([data, tmp], axis=1)
+        with open('./data/embedding_feature.pkl', 'wb') as f:
+            pickle.dump(data, f)
     return data
 
 
@@ -112,7 +130,7 @@ def generate_feature(sentence, embedding_model, label_embedding):
     # 同上, 获取embedding 特征, 不进行聚合
     w2v = wam(sentence, embedding_model, aggregate=False)  # [seq_len *300]
 
-    print(len(w2v))
+    # print(len(w2v))
     if len(w2v) < 1:
         return {
             'w2v_label_mean': np.zeros(300),
@@ -187,6 +205,165 @@ def Find_Label_embedding(example_matrix, label_embedding, method="mean"):
         return np.max(attention_embedding, axis=0)
 
 
+def Find_embedding_with_windows(embedding_matrix, window_size=2, method="mean"):
+    """
+    使用window生成embedding
+    :param embedding_matrix:
+    :param window_size:
+    :param method:
+    :return:
+    """
+    # 最终的词向量
+    result_list = []
+    # 遍历input的长度, 根据窗口的大小获取embedding, 进行mean操作, 然后将得到的结果extend到list中, 最后进行mean或者max聚合
+    for k1 in range(len(embedding_matrix)):
+        # 如果 当前位置+窗口大小 > input的长度, 则取当前位置到结尾
+        # mean 操作后要reshape 为 (1, 300) 大小
+        if int(k1+window_size) > len(embedding_matrix):
+            result_list.extend(
+                np.mean(embedding_matrix[k1:], axis=0).reshape(1, 300)
+            )
+        else:
+            result_list.extend(
+                np.mean(embedding_matrix[k1:k1+window_size], axis=0).reshape(1, 300)
+            )
 
-def Find_embedding_with_windows(example_matrix, window_size=2, method="mean"):
-    return 1
+    if method == "mean":
+        return np.mean(result_list, axis=0)
+    else:
+        return np.max(result_list, axis=0)
+
+
+def get_lda_features_helper(lda_model, document):
+    """
+    基于 bag of word 格式数据获取lda的特征
+    :param lda_model:
+    :param document:
+    :return:
+    """
+    topic_importances = lda_model.get_document_topics(document, minimum_probability=0)
+
+    topic_importances = np.array(topic_importances)
+    return topic_importances[:, 1]
+
+
+def get_lda_features(data, lda_model):
+
+    if os.path.exists('./data/lda_feature.pkl'):
+        with open('./data/lda_feature.pkl', 'rb') as f:
+            data = pickle.load(f)
+        return data
+
+    if isinstance(data.iloc[0]["text"], str):
+        data["text"] = data["text"].apply(lambda x: x.split())
+
+    data["bow"] = data["text"].apply(
+        lambda x: lda_model.id2word.doc2bow(x)
+    )
+
+    data["lda"] = list(
+        map(lambda doc: get_lda_features_helper(lda_model, doc), data["bow"])
+    )
+
+    cols = [x for x in data.columns if x not in ["lda", "bow"]]
+
+    data = pd.concat([data[cols], array2df(data, "lda")], axis=1)
+    with open("./data/lda_feature.pkl", 'wb') as f:
+        pickle.dump(data, f)
+    return data
+
+
+def get_basic_feature(data):
+    if os.path.exists('./data/basic_feature.pkl'):
+        with open('./data/basic_feature.pkl', 'rb') as f:
+            data = pickle.load(f)
+        return data
+
+    tmp = data["text"].apply(
+        lambda x: pd.Series(get_basic_feature_helper(x))
+    )
+
+    data = pd.concat([data, tmp], axis=1)
+
+    with open("./data/basic_feature.pkl", 'wb') as f:
+        pickle.dump(data, f)
+    return data
+
+
+def get_basic_feature_helper(text):
+    ch2en = {
+        '！': '!',
+        '？': '?',
+        '｡': '.',
+        '（': '(',
+        '）': ')',
+        '，': ',',
+        '：': ':',
+        '；': ';',
+        '｀': ','
+        }
+    if isinstance(text, str):
+        text = text.split()
+    # 分词
+    queryCut = [i if i not in ch2en.keys() else ch2en[i] for i in text]
+    # 词的个数
+    num_words = len(queryCut)
+    # 大写的个数
+    capitals = sum(1 for c in queryCut if c.isupper())
+    # 大写 与 文词的个数的占比
+    caps_vs_length = capitals / num_words
+    # 感叹号的个数
+    num_exclamation_marks = queryCut.count('!')
+    # 问号个数
+    num_question_marks = queryCut.count('?')
+    # 标点符号个数
+    num_punctuation = sum(queryCut.count(w) for w in string.punctuation)
+    # *&$%字符的个数
+    num_symbols = sum(queryCut.count(w) for w in '*&$%')
+    # 唯一词的个数
+    num_unique_words = len(set(w for w in queryCut))
+    # 唯一词 与总词数的比例
+    words_vs_unique = num_unique_words / num_words
+    # 获取名词， 形容词， 动词的个数， 使用tag_part_of_speech函数
+    nouns, adjectives, verbs = tag_part_of_speech("".join(text))
+    # 名词占词的个数的比率
+    nouns_vs_length = nouns / num_words
+    # 形容词占词的个数的比率
+    adjectives_vs_length = adjectives / num_words
+    # 动词占词的个数的比率
+    verbs_vs_length = verbs / num_words
+    # 首字母大写其他小写的个数
+    count_words_title = len([w for w in queryCut if w.istitle()])
+    # 平均词的个数
+    mean_word_len = np.mean([len(w) for w in queryCut])
+    return {
+        'num_words': num_words,
+        'capitals': capitals,
+        'caps_vs_length': caps_vs_length,
+        'num_exclamation_marks': num_exclamation_marks,
+        'num_question_marks': num_question_marks,
+        'num_punctuation': num_punctuation,
+        'num_symbols': num_symbols,
+        'num_unique_words': num_unique_words,
+        'words_vs_unique': words_vs_unique,
+        'nouns': nouns,
+        'adjectives': adjectives,
+        'verbs': verbs,
+        'nouns_vs_length': nouns_vs_length,
+        'adjectives_vs_length': adjectives_vs_length,
+        'verbs_vs_length': verbs_vs_length,
+        'count_words_title': count_words_title,
+        'mean_word_len': mean_word_len
+    }
+
+
+def tag_part_of_speech(data):
+    # 获取文本的词性， 并计算名词，动词， 形容词的个数
+    words = [tuple(x) for x in list(pseg.cut(data))]
+    noun_count = len(
+        [w for w in words if w[1] in ('NN', 'NNP', 'NNPS', 'NNS')])
+    adjective_count = len([w for w in words if w[1] in ('JJ', 'JJR', 'JJS')])
+    verb_count = len([
+        w for w in words if w[1] in ('VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ')
+    ])
+    return noun_count, adjective_count, verb_count
