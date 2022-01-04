@@ -57,6 +57,26 @@ class Classifier:
 
     def trainer(self):
         self.train = self.feature_engineer(self.train)
+        self.dev = self.feature_engineer(self.dev)
+        cols = [x for x in self.train.columns if x not in self.exclusive_col]
+
+        X_train = self.train[cols]
+        y_train = self.train["label"]
+
+        X_test = self.dev[cols]
+        y_test = self.dev["label"]
+
+        mlb = MultiLabelBinarizer(sparse_output=False)
+
+        y_train_new = [[i] for i in y_train]
+        y_test_new = [[i] for i in y_test]
+
+        y_train = mlb.fit_transform(y_train_new)
+        y_test = mlb.transform(y_test_new)
+
+        print('X_train: ', X_train.shape, 'y_train: ', y_train.shape)
+        print(mlb.classes_)
+        print("1")
 
 
 if __name__ == "__main__":
