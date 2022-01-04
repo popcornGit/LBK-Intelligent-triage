@@ -76,7 +76,6 @@ class Classifier:
 
         print('X_train: ', X_train.shape, 'y_train: ', y_train.shape)
         print(mlb.classes_)
-        print("1")
 
 
 if __name__ == "__main__":
