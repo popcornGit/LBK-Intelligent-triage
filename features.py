@@ -26,10 +26,6 @@ def label2idx(data):
 
 
 def get_tfidf(tfidf, data):
-    if os.path.exists('./data/tfidf.pkl'):
-        with open('./data/tfidf.pkl', 'rb') as f:
-            data = pickle.load(f)
-        return data
 
     stopWords = [x.strip() for x in open("./data/stopwords.txt").readlines()]
     text = data["text"].apply(lambda x: " ".join([w for w in x.split() if w not in stopWords and w != '']))
@@ -39,8 +35,7 @@ def get_tfidf(tfidf, data):
     data_tfidf.columns = ['tfidf' + str(i) for i in range(data_tfidf.shape[1])]
     data = pd.concat([data, data_tfidf], axis=1)
     # print(data.loc[0].values())
-    with open('./data/tfidf.pkl', 'wb') as f:
-        pickle.dump(data, f)
+
     return data
 
 
@@ -60,30 +55,22 @@ def get_embedding_feature(data, embedding_model):
     :param embedding_model:
     :return:
     """
-    if os.path.exists('./data/embedding_feature.pkl'):
-        with open('./data/embedding_feature.pkl', 'rb') as f:
-            data = pickle.load(f)
-        return data
+    labelToIndex = label2idx(data)
 
+    w2v_label_embedding = np.array(
+        [np.mean([embedding_model[word] for word in key
+                  if word in embedding_model.index_to_key],
+                 axis=0)
+         for key in labelToIndex])
 
-    else:
-        labelToIndex = label2idx(data)
+    joblib.dump(w2v_label_embedding, './data/w2v_label_embedding.pkl')
 
-        w2v_label_embedding = np.array(
-            [np.mean([embedding_model[word] for word in key
-                      if word in embedding_model.index_to_key],
-                     axis=0)
-             for key in labelToIndex])
+    tmp = data['text'].apply(lambda x: pd.Series(
+        generate_feature(x, embedding_model, w2v_label_embedding)
+    ))
+    tmp = pd.concat([array2df(tmp, col) for col in tmp.columns], axis=1)
+    data = pd.concat([data, tmp], axis=1)
 
-        joblib.dump(w2v_label_embedding, './data/w2v_label_embedding.pkl')
-
-        tmp = data['text'].apply(lambda x: pd.Series(
-            generate_feature(x, embedding_model, w2v_label_embedding)
-        ))
-        tmp = pd.concat([array2df(tmp, col) for col in tmp.colums], axis=1)
-        data = pd.concat([data, tmp], axis=1)
-        with open('./data/embedding_feature.pkl', 'wb') as f:
-            pickle.dump(data, f)
     return data
 
 
@@ -249,11 +236,6 @@ def get_lda_features_helper(lda_model, document):
 
 def get_lda_features(data, lda_model):
 
-    if os.path.exists('./data/lda_feature.pkl'):
-        with open('./data/lda_feature.pkl', 'rb') as f:
-            data = pickle.load(f)
-        return data
-
     if isinstance(data.iloc[0]["text"], str):
         data["text"] = data["text"].apply(lambda x: x.split())
 
@@ -268,16 +250,11 @@ def get_lda_features(data, lda_model):
     cols = [x for x in data.columns if x not in ["lda", "bow"]]
 
     data = pd.concat([data[cols], array2df(data, "lda")], axis=1)
-    with open("./data/lda_feature.pkl", 'wb') as f:
-        pickle.dump(data, f)
+
     return data
 
 
 def get_basic_feature(data):
-    if os.path.exists('./data/basic_feature.pkl'):
-        with open('./data/basic_feature.pkl', 'rb') as f:
-            data = pickle.load(f)
-        return data
 
     tmp = data["text"].apply(
         lambda x: pd.Series(get_basic_feature_helper(x))
@@ -285,8 +262,6 @@ def get_basic_feature(data):
 
     data = pd.concat([data, tmp], axis=1)
 
-    with open("./data/basic_feature.pkl", 'wb') as f:
-        pickle.dump(data, f)
     return data
 
 

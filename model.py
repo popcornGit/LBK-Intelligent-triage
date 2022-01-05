@@ -9,7 +9,7 @@ import numpy as np
 import sklearn.metrics as metrics
 from sklearn.preprocessing import MultiLabelBinarizer
 from skmultilearn.problem_transform import BinaryRelevance
-
+import pickle
 from embedding import Embedding
 from features import (get_tfidf, get_embedding_feature,
                       get_lda_features, get_basic_feature)
@@ -48,7 +48,17 @@ class Classifier:
 
         self.exclusive_col = ["text", "lda", "bow", "label"]
 
-    def feature_engineer(self, data):
+    def feature_engineer(self, data, mode):
+        if mode == "train":
+            with open('data/basic_feature_train.pkl', 'rb') as f:
+                data = pickle.load(f)
+            return data
+
+        if mode == "dev":
+            with open("data/basic_feature_dev.pkl", 'rb') as f:
+                data = pickle.load(f)
+            return data
+
         data = get_tfidf(self.embedding.tfidf, data)
         data = get_embedding_feature(data, self.embedding.w2v)
         data = get_lda_features(data, self.embedding.lda)
@@ -56,8 +66,8 @@ class Classifier:
         return data
 
     def trainer(self):
-        self.train = self.feature_engineer(self.train)
-        self.dev = self.feature_engineer(self.dev)
+        self.train = self.feature_engineer(self.train, mode="train")
+        self.dev = self.feature_engineer(self.dev, mode="dev")
         cols = [x for x in self.train.columns if x not in self.exclusive_col]
 
         X_train = self.train[cols]
@@ -74,11 +84,60 @@ class Classifier:
         y_train = mlb.fit_transform(y_train_new)
         y_test = mlb.transform(y_test_new)
 
-        print('X_train: ', X_train.shape, 'y_train: ', y_train.shape)
-        print(mlb.classes_)
+        # print('X_train: ', X_train.shape, 'y_train: ', y_train.shape)
+        # print(mlb.classes_)
+
+        self.clf_BR = BinaryRelevance(classifier=lgb.LGBMClassifier(
+                                        max_depth=5,
+                                        learning_rate=0.1,
+                                        n_estimators=100,
+                                        silent=True,
+                                        objective='binary',
+                                        nthread=-1,
+                                        reg_alpha=0,
+                                        reg_lambda=1,
+                                        # device='gpu',
+                                        missing=None,
+                                    ),
+                                    require_dense=[False, True])
+
+        self.clf_BR.fit(X_train, y_train)
+        prediction = self.clf_BR.predict(X_test)
+        print(prediction)
+        print(y_test)
+        print(metrics.accuracy_score(y_test, prediction))
+
+    def save(self):
+        joblib.dump(self.clf_BR, "./model/clf_BR")
+
+    def load(self):
+        self.model = joblib.load("./model/clf_BR")
+
+    def predict(self, text):
+        df = pd.DataFrame([[text]], columns='text')
+
+        df["text"] = df["text"].apply(lambda x : " ".join(
+            [w for w in jieba.cut(x) if w not in self.stopWords and w != ""]
+        ))
+
+        df = get_tfidf(self.embedding.tfidf, df)
+        df = get_embedding_feature(df, self.embedding.w2v)
+        df = get_lda_features(df, self.embedding.lda)
+        df = get_basic_feature(df)
+
+        cols = [x for x in df.columns if x not in self.exclusive_col]
+
+        pred = self.model.predict(df[cols]).toarray()[0]
+
+        result = [self.ix2label.get(i) for i in range(len(pred)) if pred[i] > 0]
+        return result
 
 
 if __name__ == "__main__":
     bc = Classifier(train_mode=True)
-    bc.trainer()
+    # bc.trainer()
     # bc.save()
+    bc.load()
+    pred = bc.predict("张三有心脏病")
+    print(pred)
+
