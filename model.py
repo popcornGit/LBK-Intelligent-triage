@@ -114,9 +114,9 @@ class Classifier:
         self.model = joblib.load("./model/clf_BR")
 
     def predict(self, text):
-        df = pd.DataFrame([[text]], columns='text')
+        df = pd.DataFrame([[text]], columns=['text'])
 
-        df["text"] = df["text"].apply(lambda x : " ".join(
+        df["text"] = df["text"].apply(lambda x: " ".join(
             [w for w in jieba.cut(x) if w not in self.stopWords and w != ""]
         ))
 
